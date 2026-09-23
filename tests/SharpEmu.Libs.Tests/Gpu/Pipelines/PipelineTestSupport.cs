@@ -44,7 +44,12 @@ internal sealed class FakePipelineHost(ICpuMemory memory) : IShaderPipelineHost
 
     public bool GraphicsSubgroupOperationsEnabled => true;
 
+    public bool NativeDepthCompareSupported { get; set; }
+
     public RenderHostLimits Limits => new(16384, 16384, 16384, 16384);
+
+    public bool SupportsNativeDepthCompare(IReadOnlyList<uint> imageDescriptor) =>
+        NativeDepthCompareSupported;
 
     public bool TryResolveColorOutput(uint dataFormat, uint numberType, uint componentSwap, out Gen5PixelOutputKind outputKind, out Gen5ColorComponentMapping componentMapping)
     {

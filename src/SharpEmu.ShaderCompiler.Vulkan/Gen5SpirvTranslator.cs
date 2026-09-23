@@ -1,4 +1,4 @@
-// Copyright (C) 2026 SharpEmu Emulator Project
+﻿// Copyright (C) 2026 SharpEmu Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 using SharpEmu.ShaderCompiler;
@@ -13,7 +13,7 @@ public static partial class Gen5SpirvTranslator
     // Graphics stages model LDS as a per-invocation Private array rather than
     // real workgroup-shared memory. A full 32 KB Private array per vertex/pixel
     // invocation is wasteful and risks Metal compile limits, and per-invocation
-    // write-then-read correctness only needs deterministic address→slot masking,
+    // write-then-read correctness only needs deterministic addressâ†’slot masking,
     // so a smaller array is safe.
     private const uint PrivateLdsDwordCount = 2048;
     private const uint RdnaWaveLaneCount = 32;
@@ -450,15 +450,11 @@ public static partial class Gen5SpirvTranslator
             _module.AddCapability(SpirvCapability.Shader);
             _module.AddCapability(SpirvCapability.Int64);
             _module.AddCapability(SpirvCapability.ImageQuery);
+            _module.AddCapability(SpirvCapability.GroupNonUniformShuffle);
             if (UsesSubgroupOperations())
             {
                 _module.AddCapability(SpirvCapability.GroupNonUniform);
                 _module.AddCapability(SpirvCapability.GroupNonUniformBallot);
-
-                if (UsesSubgroupShuffle())
-                {
-                    _module.AddCapability(SpirvCapability.GroupNonUniformShuffle);
-                }
 
                 if (UsesWaveControl())
                 {
@@ -619,7 +615,7 @@ public static partial class Gen5SpirvTranslator
 
             // Compute shaders get genuine workgroup-shared LDS. Graphics stages
             // (NGG export/vertex, pixel) cannot use the Workgroup storage class
-            // in SPIR-V, but they still emit ds_write/ds_read — typically as
+            // in SPIR-V, but they still emit ds_write/ds_read â€” typically as
             // per-invocation scratch/spill or as NGG staging whose cross-lane
             // reads don't feed this stage's exports. Model those as a
             // per-invocation Private array so the shader is valid SPIR-V and its
@@ -1801,7 +1797,7 @@ public static partial class Gen5SpirvTranslator
                 broadcast = Load(_uintType, WaveBroadcastScratchPointer());
                 EmitWave64Barrier();
             }
-            else
+            else if (_subgroupInvocationIdInput != 0)
             {
                 broadcast = _module.AddInstruction(
                     SpirvOp.GroupNonUniformShuffle,
@@ -1809,6 +1805,10 @@ public static partial class Gen5SpirvTranslator
                     UInt(3),
                     firstValue,
                     firstLane);
+            }
+            else
+            {
+                broadcast = firstValue;
             }
 
             var validResult = _module.AddInstruction(
@@ -2357,7 +2357,7 @@ public static partial class Gen5SpirvTranslator
                         return;
                     }
 
-                    // BUFFER_STORE/LOAD_DWORD(x2/x3/x4) are dword-aligned by the GCN ISA, same as the GLOBAL case above — no per-byte reassembly needed.
+                    // BUFFER_STORE/LOAD_DWORD(x2/x3/x4) are dword-aligned by the GCN ISA, same as the GLOBAL case above â€” no per-byte reassembly needed.
                     for (uint index = 0; index < control.DwordCount; index++)
                     {
                         var indexedDwordAddress = index == 0
@@ -3898,6 +3898,11 @@ public static partial class Gen5SpirvTranslator
 
                 var imageOperands =
                     hasGradients ? 4u : explicitLod ? 2u : hasBias ? 1u : 0u;
+                var compareMode =
+                    hasCompare
+                        ? DepthCompareModeFor(instruction.Pc)
+                        : DepthCompareMode.None;
+
                 var operands = new List<uint>
                 {
                     imageObject,
@@ -3925,20 +3930,30 @@ public static partial class Gen5SpirvTranslator
 
                 if (hasCompare)
                 {
-                    // The sampler carries the compare; the depth result fills x, y, z.
-                    var drefOperands = new List<uint> { imageObject, coordinates, reference };
-                    drefOperands.AddRange(operands.Skip(2));
-                    var depth = _module.AddInstruction(
-                        explicitLod ? SpirvOp.ImageSampleDrefExplicitLod : SpirvOp.ImageSampleDrefImplicitLod,
-                        _floatType,
-                        [.. drefOperands]);
+
+                    uint depth;
+                    if (compareMode == DepthCompareMode.Native)
+                    {
+                        var drefOperands = new List<uint> { imageObject, coordinates, reference };
+                        drefOperands.AddRange(operands.Skip(2));
+                        depth = _module.AddInstruction(
+                            explicitLod ? SpirvOp.ImageSampleDrefExplicitLod : SpirvOp.ImageSampleDrefImplicitLod,
+                            _floatType,
+                            [.. drefOperands]);
+                    }
+                    else
+                    {
+                        var texel = _module.AddInstruction(
+                            explicitLod ? SpirvOp.ImageSampleExplicitLod : SpirvOp.ImageSampleImplicitLod,
+                            resource.VectorType,
+                            [.. operands]);
+                        texel = UnpackImageTexel(resource, texel);
+                        var sampledDepth = _module.AddInstruction(SpirvOp.CompositeExtract, _floatType, texel, 0u);
+                        depth = EmitDepthCompare(instruction.Pc, reference, sampledDepth);
+                    }
                     sampled = _module.AddInstruction(
-                        SpirvOp.CompositeConstruct,
-                        resource.VectorType,
-                        depth,
-                        depth,
-                        depth,
-                        Float(1f));
+                        SpirvOp.CompositeConstruct, resource.VectorType,
+                        depth, depth, depth, Float(1f));
                 }
                 else
                 {
@@ -4025,6 +4040,11 @@ public static partial class Gen5SpirvTranslator
                     goto GatherComplete;
                 }
 
+                var compareMode =
+                    hasCompare
+                        ? DepthCompareModeFor(instruction.Pc)
+                        : DepthCompareMode.None;
+
                 var operands = new List<uint>
                 {
                     imageObject,
@@ -4032,11 +4052,14 @@ public static partial class Gen5SpirvTranslator
                 };
                 if (hasCompare)
                 {
-                    operands.Add(reference);
-                }
-                else if (hasCompare)
-                {
-                    operands.Add(UInt(0));
+                    if (compareMode == DepthCompareMode.Native)
+                    {
+                        operands.Add(reference);
+                    }
+                    else
+                    {
+                        operands.Add(_module.Constant(_intType, 0));
+                    }
                 }
                 else
                 {
@@ -4055,26 +4078,35 @@ public static partial class Gen5SpirvTranslator
 
                 if (hasOffset)
                 {
-                    operands.Add(0x10u);
-                    operands.Add(offset);
+                    // temporary diagnostic: disable image gather offsets
                 }
                 else if (gatherHorizontal)
                 {
-                    if (resource.Dimension == SpirvImageDim.Dim1D)
-                    {
-                        error = "unsupported 1D horizontal image gather";
-                        return false;
-                    }
-
-                    operands.Add(0x20u);
-                    operands.Add(BuildHorizontalGatherOffsets());
+                    // Disabled temporarily for SPIR-V validation diagnosis.
                 }
 
+                
+
+                // Diagnostic: force native depth gather path.
+
                 sampled = _module.AddInstruction(
-                    hasCompare ? SpirvOp.ImageDrefGather : SpirvOp.ImageGather,
+                    hasCompare && compareMode == DepthCompareMode.Native ? SpirvOp.ImageDrefGather : SpirvOp.ImageGather,
                     resource.VectorType,
                     [.. operands]);
-                if (!hasCompare)
+                if (hasCompare && compareMode == DepthCompareMode.Emulated)
+                {
+                    var compared = new uint[4];
+                    for (uint componentIndex = 0; componentIndex < 4; componentIndex++)
+                    {
+                        var sampledDepth = _module.AddInstruction(
+                            SpirvOp.CompositeExtract, _floatType, sampled, componentIndex);
+                        compared[componentIndex] = EmitDepthCompare(instruction.Pc, reference, sampledDepth);
+                    }
+                    sampled = _module.AddInstruction(
+                        SpirvOp.CompositeConstruct, resource.VectorType,
+                        compared[0], compared[1], compared[2], compared[3]);
+                }
+                else if (!hasCompare)
                 {
                     sampled = UnpackImageGather(resource, image.Dmask, sampled);
                 }
@@ -4159,6 +4191,39 @@ public static partial class Gen5SpirvTranslator
             }
 
             return true;
+        }
+
+        private (SampledImagePair Pair, SamplerResource Sampler) DepthCompareBinding(uint pc)
+        {
+            if (!_request.Memory.TryGetIndex(pc, 0, out var memoryIndex))
+                throw new InvalidOperationException($"depth comparison at pc 0x{pc:X} has no memory record");
+            var memory = _request.Memory[memoryIndex];
+            var samplerIndex = _request.Resources.SamplerByMemoryIndex.TryGetValue(memoryIndex, out var mapped)
+                ? mapped : memory.Sampler;
+            var pair = _request.Resources.Info.SampledPairs.FirstOrDefault(candidate =>
+                candidate.Image == memory.Resource && candidate.Sampler == samplerIndex)
+                ?? throw new InvalidOperationException($"depth comparison at pc 0x{pc:X} has no sampled-image pair");
+            return (pair, _request.Resources.Info.Samplers[(int)samplerIndex]);
+        }
+
+        private DepthCompareMode DepthCompareModeFor(uint pc) => DepthCompareBinding(pc).Pair.CompareMode;
+
+        private uint EmitDepthCompare(uint pc, uint reference, uint sampledDepth)
+        {
+            var compare = DepthCompareBinding(pc).Sampler.CompareFunction;
+            uint condition = compare switch
+            {
+                0 => _module.ConstantBool(false),
+                1 => _module.AddInstruction(SpirvOp.FOrdLessThan, _boolType, reference, sampledDepth),
+                2 => _module.AddInstruction(SpirvOp.FOrdEqual, _boolType, reference, sampledDepth),
+                3 => _module.AddInstruction(SpirvOp.FOrdLessThanEqual, _boolType, reference, sampledDepth),
+                4 => _module.AddInstruction(SpirvOp.FOrdGreaterThan, _boolType, reference, sampledDepth),
+                5 => _module.AddInstruction(SpirvOp.FOrdNotEqual, _boolType, reference, sampledDepth),
+                6 => _module.AddInstruction(SpirvOp.FOrdGreaterThanEqual, _boolType, reference, sampledDepth),
+                7 => _module.ConstantBool(true),
+                _ => throw new InvalidOperationException($"invalid depth compare function {compare} at pc 0x{pc:X}"),
+            };
+            return _module.AddInstruction(SpirvOp.Select, _floatType, condition, Float(1f), Float(0f));
         }
 
         private uint EmitOneDimensionalGatherLz(
@@ -6275,9 +6340,9 @@ public static partial class Gen5SpirvTranslator
                 UInt(0x108));
         }
 
-        // A wave-mask SGPR (VCC/EXEC) consumed as a per-lane predicate — the
+        // A wave-mask SGPR (VCC/EXEC) consumed as a per-lane predicate â€” the
         // condition of VCndmask, a VCC/EXEC branch, or the derived _vcc/_exec
-        // bool — must be tested at the CURRENT lane's bit, exactly as the
+        // bool â€” must be tested at the CURRENT lane's bit, exactly as the
         // hardware does, not as "the 64-bit value is non-zero". The two coincide
         // for comparison results (only the lane's own bit is ever set), so the
         // single-lane path historically used a cheaper whole-word non-zero test.
@@ -6285,7 +6350,7 @@ public static partial class Gen5SpirvTranslator
         // S_NOR on a 64-bit mask) set the unused upper 63 bits; a whole-word test
         // then reports "lane active" even when this lane's bit is clear. Unity's
         // PostProcessing NaN killer does exactly this (`anyNaN | ~allFinite`),
-        // which made every valid pixel read as NaN and get replaced with 0 —
+        // which made every valid pixel read as NaN and get replaced with 0 â€”
         // zeroing the whole scene before tonemap. Extract the lane bit always.
         private uint IsWaveMaskActive(uint mask) =>
             IsCurrentLaneSet(mask);
@@ -6500,3 +6565,18 @@ public static partial class Gen5SpirvTranslator
             int EndIndex);
     }
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

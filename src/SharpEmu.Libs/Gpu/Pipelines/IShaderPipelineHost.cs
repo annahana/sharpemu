@@ -51,6 +51,8 @@ internal interface IShaderPipelineHost
     // Reads one guest dword only when no GPU work may still own the range.
     bool TryReadCleanGuestWord(ulong address, out uint word);
 
+    bool SupportsNativeDepthCompare(IReadOnlyList<uint> imageDescriptor);
+
     // Creates the host module of one compiled permutation and returns its handle.
     ulong CreateShaderModule(IGuestCompiledShader shader, ShaderStage stage, ulong hash, ulong programId);
 

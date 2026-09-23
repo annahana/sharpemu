@@ -93,6 +93,8 @@ public sealed class SamplerResource
     public uint FirstUsePc { get; set; }
     public bool ForcePointFiltering { get; set; }
     public bool DepthCompare { get; set; }
+    public DepthCompareMode CompareMode { get; set; }
+    public uint CompareFunction { get; set; }
 
     public SamplerResource Clone() => (SamplerResource)MemberwiseClone();
 }
@@ -102,6 +104,7 @@ public sealed class SampledImagePair
     public uint Image { get; set; }
     public uint Sampler { get; set; }
     public uint FirstUsePc { get; set; }
+    public DepthCompareMode CompareMode { get; set; }
 
     public SampledImagePair Clone() => (SampledImagePair)MemberwiseClone();
 }

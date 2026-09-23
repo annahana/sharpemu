@@ -7,6 +7,7 @@ namespace SharpEmu.ShaderCompiler.Resources;
 
 // Reads one dword of guest memory; false when the address cannot be read.
 public delegate bool GuestWordReader(ulong address, out uint word);
+public delegate bool NativeDepthCompareQuery(IReadOnlyList<uint> imageDescriptor);
 
 // What one draw supplies to materialise a plan: its user data, the shader base and
 // the two memory readers. The clean reader refuses memory the GPU may still own.
@@ -17,6 +18,7 @@ public sealed class ResourceRuntimeInputs
     public GuestWordReader? ReadMemory { get; init; }
     public GuestWordReader? ReadCleanMemory { get; init; }
     public ComputeSelectorState? ComputeState { get; init; }
+    public NativeDepthCompareQuery? SupportsNativeDepthCompare { get; init; }
 
     public ResourceRuntimeInputs WithReader(GuestWordReader? reader) => new()
     {
@@ -25,6 +27,7 @@ public sealed class ResourceRuntimeInputs
         ReadMemory = reader,
         ReadCleanMemory = ReadCleanMemory,
         ComputeState = ComputeState,
+        SupportsNativeDepthCompare = SupportsNativeDepthCompare,
     };
 }
 

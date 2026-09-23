@@ -128,6 +128,16 @@ internal static unsafe partial class VulkanVideoPresenter
         }
 
         // Compare bits stay only on depth-compare samplers; a forced point sampler drops its filters.
+        bool IShaderPipelineHost.SupportsNativeDepthCompare(IReadOnlyList<uint> imageDescriptor)
+        {
+            var shape = new ShaderImageShape(
+                Volume: false, Arrayed: false, Cube: false, Storage: false, DynamicMip: false,
+                NumericClass: TextureNumericClass.Float, OneDimensional: false, R128: false,
+                Multisampled: false, DepthCompare: true);
+            var resolution = ImageRequestBuilders.Texture(imageDescriptor.ToArray(), shape);
+            return _deviceInfo.SupportsSampledImageDepthComparison(resolution.ViewFormat);
+        }
+
         private Sampler ResolveSampler(SamplerResource sampler, uint[] words, ShaderProgramInfo program, int index, ShaderStageResources stage)
         {
             if (words.Length < 4)
@@ -136,7 +146,7 @@ internal static unsafe partial class VulkanVideoPresenter
             }
 
             Span<uint> native = stackalloc uint[4] { words[0], words[1], words[2], words[3] };
-            if (!sampler.DepthCompare)
+            if (sampler.CompareMode != DepthCompareMode.Native)
             {
                 native[0] &= ~(0x7u << 12);
             }

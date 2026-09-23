@@ -1,4 +1,4 @@
-// Copyright (C) 2026 SharpEmu Emulator Project
+﻿// Copyright (C) 2026 SharpEmu Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 using System.IO.Hashing;
@@ -120,7 +120,7 @@ public sealed unsafe partial class CachedImage : IDisposable
             SharingMode = SharingMode.Exclusive,
             Samples = ImageDescription.VulkanSampleCount(Backing.Samples),
         };
-        if (!TrySelectSupportedImageConfiguration(device, ref create, allowCompressedImageFallback: OperatingSystem.IsMacOS()))
+        if (!TrySelectSupportedImageConfiguration(device, ref create, allowCompressedImageFallback: true))
         {
             throw SubmissionScheduler.Fatal(
                 $"The image format does not support the required usage: format={(int)create.Format} type={(int)create.ImageType} usage=0x{(uint)create.Usage:x} flags=0x{(uint)create.Flags:x} samples={Backing.Samples}.");
@@ -529,3 +529,6 @@ public sealed unsafe partial class CachedImage : IDisposable
         }
     }
 }
+
+
+

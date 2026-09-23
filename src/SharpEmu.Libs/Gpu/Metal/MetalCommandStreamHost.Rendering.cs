@@ -225,6 +225,8 @@ internal sealed partial class MetalCommandStreamHost : IRenderHost, IShaderPipel
 
     IImageFormatSupport IRenderHost.FormatSupport => _formatSupport;
 
+    bool IShaderPipelineHost.SupportsNativeDepthCompare(IReadOnlyList<uint> imageDescriptor) => true;
+
     // The ordered queue of the presenter takes every record; nothing waits on a command buffer.
     bool IRenderHost.IsRecording => true;
 

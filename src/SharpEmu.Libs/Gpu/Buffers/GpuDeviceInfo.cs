@@ -77,6 +77,19 @@ public sealed unsafe class GpuDeviceInfo : IImageFormatSupport
         }
     }
 
+    public bool SupportsSampledImageDepthComparison(Format format)
+    {
+        var properties3 = new FormatProperties3 { SType = StructureType.FormatProperties3 };
+        var properties2 = new FormatProperties2
+        {
+            SType = StructureType.FormatProperties2,
+            PNext = &properties3,
+        };
+        Vk.GetPhysicalDeviceFormatProperties2(PhysicalDevice, format, &properties2);
+        const ulong sampledImageDepthComparisonBit = 0x0000000200000000UL;
+        return ((ulong)properties3.OptimalTilingFeatures & sampledImageDepthComparisonBit) != 0;
+    }
+
     public bool TryGetImageFormatProperties(Format format, ImageType type, ImageTiling tiling, ImageUsageFlags usage, ImageCreateFlags flags, out ImageFormatProperties properties)
     {
         lock (_gate)
